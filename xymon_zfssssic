@@ -1,0 +1,55 @@
+#!/usr/local/bin/bash
+
+TEST="remote-zfs"
+DISPCOLOR="green"
+FIRST_LINE="<BR>zfs snap local remote for : <br>"$(date -v-1m "+"monthly"-%Y-[%m")"/"$(date -v-0m "+%m"])
+#FIRST_LINE_HEALTH="okay"
+#FIRST_LINE_CAP="okay"
+#DATA=$(date -v-1m "+"monthly"-%Y-%m")
+
+#What: beautify the page display by html code.
+STRING="<center>\
+<table style='border:solid 1px #777777; border-collapse:collapse; font-size:11px;' border=1 cellpadding=10>\
+<tr><th colspan="3"></th><th colspan="2">"$(date -v-1m "+"monthly"-%Y-%m")"</th><th></th><th colspan="2">"$(date -v-0m "+"monthly"-%Y-%m")"</th></tr>\
+<tr><th>zfs snap "$DATA"</th><th>state</th><th></th><th>local</th><th>remote</th><th></th><th>local</th><th>remote</th></tr>"
+
+/usr/local/bin/sudo /root/bin/zfs-check-backup.sh -Hlrnb1 | { while read local remote nextlocal nextremote zfs
+do
+    LINE_COLOR="green"
+    statecolor="green"
+
+    # Determine the snaps colours
+    if [ "$local" == "x" ]; then localcolor="green"
+    elif [ "$local" == "." ]; then localcolor="yellow"; fi
+    if [ "$remote" == "x" ]; then remotecolor="green"
+    elif [ "$remote" == "." ]; then remotecolor="yellow"; fi
+    if [ "$nextlocal" == "x" ]; then nextlocalcolor="green"
+    elif [ "$nextlocal" == "." ]; then nextlocalcolor="yellow"; fi
+    if [ "$nextremote" == "x" ]; then nextremotecolor="green"
+    elif [ "$nextremote" == "." ]; then nextremotecolor="yellow"; fi
+
+    # Determine the state color
+    [ "$nextlocalcolor" == "green" -a "$nextremotecolor" == "green" ] && statecolor="green"
+    [ "$remotecolor" == "green" -a "$nextremotecolor" == "yellow" ] && statecolor="yellow"
+    [ "$localcolor" == "green" -a "$nextlocalcolor" == "yellow" -a "$remotecolor" == "green" ] && statecolor="yellow"
+    [ "$localcolor" == "yellow" -a "$nextlocalcolor" == "yellow" ] && statecolor="red"
+    [ "$remotecolor" == "yellow" -a "$nextremotecolor" == "yellow" ] && statecolor="red"
+   
+    #Determine the final colour status
+    [ "$DISPCOLOR" != "red" -a "$statecolor" == "yellow" ] && DISPCOLOR="yellow"
+    [ "$statecolor" == "red" ] && DISPCOLOR="red"
+
+    STRING=`echo "${STRING}<tr><td>${zfs}</td><td>&${statecolor}</td><td style='background-color:black;'></td><td>&${localcolor}</td><td>&${remotecolor}</td><td style='background-color:black;'></td><td>&${nextlocalcolor}</td><td>&${nextremotecolor}</td></tr>"`
+    echo $STRING > /tmp/zfs-snap
+done
+
+DATA=$(echo "Snapshot local remote $DATA \n\n")
+STRING="</table></center><br><br>"
+echo $STRING >> /tmp/zfs-snap
+
+out=`cat /tmp/zfs-snap`
+
+# What: Sent out the final bb message to hobbit server.
+$BB $BBDISP "status $MACHINE.$TEST $DISPCOLOR `date` $FIRST_LINE $out"
+$BB $BBDISP "data $MACHINE.$TEST $DISPCOLOR $(echo; echo "$DATA" ;echo;echo)"
+}
