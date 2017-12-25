@@ -1,4 +1,13 @@
-#!/usr/local/bin/bash
+#!/usr/bin/env bash
+
+######################################
+# zfsssics.sh - zfs send snapshot incremental check 
+# For : This script send all snapshot for first to
+#       last incrementaly on a remote server
+# Usage: ./zfsssics.sh
+# Author: Michel Le Cocq <lecocq@ipgp.fr>
+# Update: 21.12.2017
+######################################
 
 # - avoir la possibilite de remondre Y automatiquement
 # - avoir ine liste zlist le moins restrictive possible
@@ -6,13 +15,17 @@
 # script to list send check zfs to remote 
 # from snapshot made with zfs-periodic
 
-# Options paramétrables
-local_zpool=zroot
-remote_zfs=zroot/cahost
-remote_host=fnas-vpn
-zlist=$(zfs list -H -o name | grep -v poudr | grep -v ROOT | grep -v zroot/distfiles | grep -v zroot$ | grep -v zroot/fnas)
-active_bootfs=$(zpool get bootfs zroot | awk 'END{print $3}')
-zlist=$zlist' '$active_bootfs
+config=$(basename "$0" .sh).conf
+if [ -e $config ]
+then
+    source ./$config
+else
+    printf 'fill config file : '$config'\n'
+    printf 'like this :
+    
+    '
+    exit 1
+fi
 
 # Autres variables à ne pas modifier
 OPTIND=1         # Reset in case getopts has been used previously in the shell.
@@ -195,6 +208,34 @@ function optchk {
 	echo "can't check next mount from current mount -b 0."; exit 1; fi
 }
 
+function optload {
+	while getopts "Hh?vb:lrsncy" opt; do
+	    case "$opt" in
+	    h|\?)
+	        help
+	        ;;
+	    v)  verbose=1
+	        ;;
+	    r)  remote_opt=1
+	        ;;
+	    l)  local_opt=1
+	        ;;
+	    b)  back=$OPTARG
+	        ;;
+	    s)  send_opt=1
+	        ;;
+	    n)  next_opt=1
+	        ;;
+	    H)  header=0
+	        ;;
+	    c)  create_opt=1
+		;;
+	    y)  yes_opt=1
+	        ;;
+	    esac
+	done       
+}
+
 function help {
     echo 'Usage : '$0' [OPTION...]'
     echo '
@@ -211,85 +252,70 @@ function help {
     exit 0
 }
 
-while getopts "Hh?vb:lrsncy" opt; do
-    case "$opt" in
-    h|\?)
-        help
-        ;;
-    v)  verbose=1
-        ;;
-    r)  remote_opt=1
-        ;;
-    l)  local_opt=1
-        ;;
-    b)  back=$OPTARG
-        ;;
-    s)  send_opt=1
-        ;;
-    n)  next_opt=1
-        ;;
-    H)  header=0
-        ;;
-    c)  create_opt=1
-	;;
-    y)  yes_opt=1
-        ;;
-    esac
-done
+function main {    
 
-optchk
-if [ "$verbose" -eq 1 ]; then verbosity; fi
+    optload
+    optchk
 
-# list les snapshots locaux
-if [ "$local_opt" -eq 1 ]; then
-    zfs list -o name -t snapshot > $tmp_file
-fi
-
-# list les snapshots distants
-if [ "$remote_opt" -eq 1 ]; then
-    ssh root@$remote_host zfs list -o name -t snapshot | grep $remote_zfs > $tmp_remote_file
-fi
-
-snaptypechck "$snaptype"
-if [[ ( "$header" -eq 1 ) && ( "$send_opt" -eq 0 ) ]]; then showheader; fi
-
-# pour tout ce que l'on veut vérifier
-for z in $zlist
-do 
-    if [[ ( "$header" -eq 1 ) && ( "$send_opt" -eq 1 ) ]]; then showheader; fi
-    f=''; g='';
-    echo -n ' ' # premier espace d'affichage
-    f=$(havelocalsnap)
-    if [[ ( -z "$f" ) && ( "$local_opt" -eq 1 ) ]]
-    then echo -n '.'
-    if [ "$header" -eq 1 ]; then echo -n '     '; fi
-    echo -n ' '
-    elif [ "$local_opt" -eq 1 ] 
-    then echo -n 'x'
-    if [ "$header" -eq 1 ]; then echo -n '     '; fi
-    echo -n ' '; fi	
-    g=$(haveremotesnap 'monthly' 'current')
-    if [[ ( -z "$g" ) && ( "$remote_opt" -eq 1 ) ]]
-    then echo -n '.'
-	if [ "$header" -eq 1 ]; then echo -n '      '; fi
-	echo -n ' '
-	# si l'option est la creons les nouveaux snap distants
-	if [[ ( "$create_opt" -eq 1 ) ]]; then sendsnap; fi
-    elif [ "$remote_opt" -eq 1 ]
-    then echo -n 'x'
-	if [ "$header" -eq 1 ]; then echo -n '      '; fi
-	echo -n ' '; 
+    if [ "$verbose" -eq 1 ]; then verbosity; fi
+    
+    # list les snapshots locaux
+    if [ "$local_opt" -eq 1 ]; then
+        zfs list -o name -t snapshot > $tmp_file
     fi
-    # si l'option est la nous recherchons le snap suivant
-    if [[ ( "$next_opt" -eq 1 ) ]]; then nextsnap; fi
-    # affichage du volume zfs courant
-    if [[ ( "$send_opt" -eq 0 ) ]]; then
-    	echo -n $z' ' 
+    
+    # list les snapshots distants
+    if [ "$remote_opt" -eq 1 ]; then
+        ssh root@$remote_host zfs list -o name -t snapshot | grep $remote_zfs > $tmp_remote_file
     fi
-    # juste une ligne pour aider a la lecture de la sortie
-    echo
-done
+    
+    snaptypechck "$snaptype"
+    if [[ ( "$header" -eq 1 ) && ( "$send_opt" -eq 0 ) ]]; then showheader; fi
+    
+    # pour tout ce que l'on veut vérifier
+    for z in $zlist
+    do 
+        if [[ ( "$header" -eq 1 ) && ( "$send_opt" -eq 1 ) ]]; then showheader; fi
+        f=''; g='';
+        echo -n ' ' # premier espace d'affichage
+        f=$(havelocalsnap)
+        if [[ ( -z "$f" ) && ( "$local_opt" -eq 1 ) ]]
+        then echo -n '.'
+        if [ "$header" -eq 1 ]; then echo -n '     '; fi
+        echo -n ' '
+        elif [ "$local_opt" -eq 1 ] 
+        then echo -n 'x'
+        if [ "$header" -eq 1 ]; then echo -n '     '; fi
+        echo -n ' '; fi	
+        g=$(haveremotesnap 'monthly' 'current')
+        if [[ ( -z "$g" ) && ( "$remote_opt" -eq 1 ) ]]
+        then echo -n '.'
+    	if [ "$header" -eq 1 ]; then echo -n '      '; fi
+    	echo -n ' '
+    	# si l'option est la creons les nouveaux snap distants
+    	if [[ ( "$create_opt" -eq 1 ) ]]; then sendsnap; fi
+        elif [ "$remote_opt" -eq 1 ]
+        then echo -n 'x'
+    	if [ "$header" -eq 1 ]; then echo -n '      '; fi
+    	echo -n ' '; 
+        fi
+        # si l'option est la nous recherchons le snap suivant
+        if [[ ( "$next_opt" -eq 1 ) ]]; then nextsnap; fi
+        # affichage du volume zfs courant
+        if [[ ( "$send_opt" -eq 0 ) ]]; then
+        	echo -n $z' ' 
+        fi
+        # juste une ligne pour aider a la lecture de la sortie
+        echo
+    done
+}
 
-# netoyage des fichier temporaire de list de snapshots
-if [ "$local_opt" -eq 1 ]; then rm $tmp_file; fi
-if [ "$remote_opt" -eq 1 ]; then rm $tmp_remote_file; fi
+function clean {
+    # netoyage des fichier temporaire de list de snapshots
+    if [ "$local_opt" -eq 1 ]; then rm $tmp_file; fi
+    if [ "$remote_opt" -eq 1 ]; then rm $tmp_remote_file; fi
+}
+
+main
+clean
+
